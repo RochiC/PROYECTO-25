@@ -1,6 +1,6 @@
 import express from "express"
 import cors from "cors"
-import { allMolechules } from "./molecula_controller.js";
+import { allMolechules, createMolechules } from "./molecula_controller.js";
 const app = express();
 const PORT = 3000;
 app.use(express.json());
@@ -15,4 +15,5 @@ app.listen(PORT, () => {
       });
 
 app.post("/all",(req,res)=>{allMolechules(req,res)})
+app.post("/create",(req,res)=>{createMolechules(req,res)})
 

@@ -24,6 +24,7 @@ export const createMolechules = async(req,res)=>{
             toxicidad_potencial,
         }
     })
+    console.log(molechules)
     res.status(201).send("Creado correctamente")
    } catch (error) {
     res.status(500).send(error)

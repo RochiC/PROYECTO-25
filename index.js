@@ -14,5 +14,5 @@ app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
       });
 
-app.post("/todo",(req,res)=>{allMolechules(req,res)})
+app.post("/all",(req,res)=>{allMolechules(req,res)})
 

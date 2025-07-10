@@ -14,6 +14,6 @@ app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
       });
 
-app.post("/all",async(req,res)=>{await allMolechules(req,res)})
+app.get("/all",async(req,res)=>{await allMolechules(req,res)})
 app.post("/create",async(req,res)=>{await createMolechules(req,res)})
 

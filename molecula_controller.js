@@ -18,8 +18,8 @@ export const createMolechules = async(req,res)=>{
     let molechules = await prisma.molecula.create({
         data:{
             lipinski_ok,
-            peso_molecular,
-            prediccion_bioactiva,
+            peso_molecular:parseFloat(peso_molecular),
+            prediccion_bioactiva:parseInt(prediccion_bioactiva),
             smiles,
             toxicidad_potencial,
         }

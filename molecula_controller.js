@@ -15,6 +15,17 @@ export const allMolechules = async(req,res)=>{
 export const createMolechules = async(req,res)=>{
     const {lipinski_ok,peso_molecular,prediccion_bioactiva,smiles,toxicidad_potencial} = req.body
    try {
+    let existe = await prisma.molecula.findFirst({
+        where: {
+            smiles:smiles
+        }
+    })
+    if (existe) {
+        return res.status(400).json({
+            ok: false,
+            mensaje: "La molécula ya existe"
+        })
+    }
     let molechules = await prisma.molecula.create({
         data:{
             lipinski_ok,

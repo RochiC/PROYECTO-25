@@ -17,3 +17,4 @@ app.listen(PORT, () => {
 app.get("/all",async(req,res)=>{await allMolechules(req,res)})
 app.post("/create",async(req,res)=>{await createMolechules(req,res)})
 
+

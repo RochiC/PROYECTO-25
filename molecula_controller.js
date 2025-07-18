@@ -25,8 +25,11 @@ export const createMolechules = async(req,res)=>{
         }
     })
     console.log(molechules)
-    res.status(201).send("Creado correctamente")
-   } catch (error) {
+res.status(201).json({
+  ok: true,
+  data: molechules,
+  mensaje: "Molécula creada correctamente"
+})   } catch (error) {
     res.status(500).send(error)
    }
 }

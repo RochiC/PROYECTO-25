@@ -1,6 +1,53 @@
-venv
-.env
-/node_modules/
-/generated/prisma
+# --- Entornos virtuales Python ---
 .venv/
+venv/
+ENV/
+env/
+
+# --- Archivos de entorno ---
+.env
+*.env
+
+# --- Node.js ---
+node_modules/
+
+# --- Prisma ---
+/generated/prisma
+
+# --- Cachés de Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+dist/
+build/
+
+# --- Archivos de sistema ---
+.DS_Store
+Thumbs.db
+
+# --- Datos/archivos pesados ---
+*.dll
+*.lib
+*.so
+*.dylib
+*.exe
+*.bin
+*.log
+
+# --- Modelos y pesos de IA ---
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.joblib
+
+# --- Carpetas comunes de datasets ---
+data/
+datasets/
+models/
+
 

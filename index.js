@@ -1,13 +1,6 @@
 import 'dotenv/config';
 import express from "express";
 import cors from "cors";
-import {
-  allMolechules,
-  createMolechules,
-  suggestNewMolecule,
-  suggestRaw,          // 👈 import del nuevo endpoint
-} from "./molecula_controller.js";
-import { IAHttpClient } from "./ai/httpClient.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,25 +8,30 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cors());
 
-// ===== Inyección del cliente de IA =====
-const IA_URL = process.env.IA_URL || "http://localhost:8000/infer"; 
-const ia = new IAHttpClient({ url: IA_URL, timeoutMs: 15000 });
-app.locals.ia = ia;
-// =======================================
+// ---- función ultra simple para "cambiar" el SMILES ----
+function mutarSmiles(s) {
+  if (!s || typeof s !== "string") return s;
 
-app.get("/api", (_req, res) => {
-  res.json({ mensaje: "¡Hola desde el back-end!" });
+  // Si ya termina en 'N', agrego 'O'; si no, agrego 'N'.
+  // Así garantizamos que sea distinto.
+  return s.endsWith("N") ? s + "O" : s + "N";
+}
+
+// Endpoint mínimo: recibe {smiles} y devuelve {smiles:nuevo}
+app.post("/mutar", (req, res) => {
+  const { smiles } = req.body ?? {};
+  if (!smiles) {
+    return res.status(400).json({ ok: false, mensaje: "Falta 'smiles' en el body" });
+  }
+  const nuevo = mutarSmiles(smiles);
+  return res.json({
+    ok: true,
+    data: { smiles: nuevo },
+    mensaje: "mutación simple aplicada",
+  });
 });
 
-// Rutas existentes
-app.get("/all", async (req, res) => { await allMolechules(req, res); });
-app.post("/create", async (req, res) => { await createMolechules(req, res); });
-
-// Ruta que genera y guarda (si querés usar DB)
-app.post("/suggest", async (req, res) => { await suggestNewMolecule(req, res); });
-
-// NUEVA ruta: llamada directa a la IA (sin DB)
-app.post("/suggest-raw", async (req, res) => { await suggestRaw(req, res); });
+app.get("/api", (_req, res) => res.json({ mensaje: "¡Hola desde el back-end!" }));
 
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en http://localhost:${PORT}`);

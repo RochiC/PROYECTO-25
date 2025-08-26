@@ -1,55 +1,7 @@
-# app.py — Servicio FastAPI para generar SMILES nuevos
+# app.py — Servicio FastAPI de IA (mock generativo "decente")
 from fastapi import FastAPI
 from pydantic import BaseModel
-import os, random
-
-# Intentar usar modelo de Hugging Face o local si existe
-USE_MODEL = False
-tokenizer = None
-model = None
-
-HUGGINGFACE_ID = os.getenv("HUGGINGFACE_ID", "").strip()
-LOCAL_DIR = os.getenv("LOCAL_MODEL_DIR", "").strip()  # opcional: ruta absoluta o relativa
-
-def _try_load_model():
-    global USE_MODEL, tokenizer, model
-    try:
-        if HUGGINGFACE_ID:
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            tokenizer = AutoTokenizer.from_pretrained(HUGGINGFACE_ID)
-            model = AutoModelForCausalLM.from_pretrained(HUGGINGFACE_ID)
-            model.eval()
-            USE_MODEL = True
-            print(f"[IA] Cargado desde HuggingFace: {HUGGINGFACE_ID}")
-            return
-    except Exception as e:
-        print(f"[IA] No pude cargar {HUGGINGFACE_ID}: {e}")
-
-    try:
-        if LOCAL_DIR and os.path.isdir(LOCAL_DIR):
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            tokenizer = AutoTokenizer.from_pretrained(LOCAL_DIR)
-            model = AutoModelForCausalLM.from_pretrained(LOCAL_DIR)
-            model.eval()
-            USE_MODEL = True
-            print(f"[IA] Cargado modelo local: {LOCAL_DIR}")
-            return
-    except Exception as e:
-        print(f"[IA] No pude cargar modelo local {LOCAL_DIR}: {e}")
-
-    # sin modelo → fallback
-    USE_MODEL = False
-    print("[IA] Sin modelo. Uso fallback de mutación de SMILES.")
-
-_try_load_model()
-
-# RDKit opcional para validar/calcular props (si no está instalado, seguimos)
-try:
-    from rdkit import Chem
-    from rdkit.Chem import Descriptors, Crippen, Lipinski
-    RDKit_OK = True
-except Exception:
-    RDKit_OK = False
+import random, re, hashlib
 
 app = FastAPI()
 
@@ -57,114 +9,117 @@ class InferInput(BaseModel):
     smiles: str | None = None
     prompt: str | None = None
 
-def mutate_smiles(smiles: str) -> str:
-    """
-    Fallback: cambia el SMILES de forma no trivial.
-    - inserta, reemplaza o borra un símbolo común.
-    """
-    if not smiles:
-        smiles = "C"
-    tokens = list(smiles)
-    ops = ["insert", "replace", "delete"]
-    op = random.choice(ops)
+# Fragmentos "químicos" básicos para armar mutaciones simpáticas
+FRAGS = [
+    "C", "N", "O", "S", "F", "Cl", "Br",
+    "CC", "CN", "OC", "C=O", "C#N", "C=C",
+    "c1ccccc1",       # fenilo
+    "C(C)C",          # isopropilo
+    "CCO", "NC=O"
+]
 
-    # Algunos símbolos “orgánicos” frecuentes en SMILES:
-    pool = ["C", "N", "O", "S", "F", "Cl", "Br", "I", "P", "B", "=", "#", "(", ")", "[O-]", "[NH+]", "c", "n", "o"]
+TWO_LETTER = {"Cl","Br"}  # para no romper halógenos al cortar
 
-    if op == "insert":
-        t = random.choice(pool)
-        pos = random.randrange(0, len(tokens)+1)
-        if len(t) == 2:  # ej Cl, Br
-            tokens[pos:pos] = list(t)
+def tokenize_simple(s: str) -> list[str]:
+    """Tokenizador muy simple que respeta Cl/Br como tokens de 2 letras."""
+    out, i = [], 0
+    while i < len(s):
+        if i+1 < len(s) and s[i:i+2] in TWO_LETTER:
+            out.append(s[i:i+2]); i += 2
         else:
-            tokens.insert(pos, t)
-    elif op == "replace" and len(tokens) > 0:
-        t = random.choice(pool)
-        pos = random.randrange(0, len(tokens))
-        if len(t) == 1:
-            tokens[pos] = t
-        else:
-            # reemplazo por varios chars
-            tokens[pos:pos+1] = list(t)
-    elif op == "delete" and len(tokens) > 1:
-        pos = random.randrange(0, len(tokens))
-        del tokens[pos]
+            out.append(s[i]); i += 1
+    return out
 
-    candidate = "".join(tokens)
-    candidate = candidate.replace("Cl", "Cl").replace("Br", "Br")  # no-op para mantener dígrafos
-    if candidate == smiles:
-        return smiles + "O"  # asegurar cambio visible
-    return candidate
+def det_rand(smiles: str) -> random.Random:
+    """RNG determinístico por SMILES (para propiedades estables)."""
+    h = hashlib.sha1(smiles.encode("utf-8")).hexdigest()
+    seed = int(h[:16], 16)
+    return random.Random(seed)
 
-def generar_con_modelo(base: str, max_len: int = 60) -> str:
-    """
-    Si hay modelo causal cargado, genera desde el SMILES base.
-    """
-    from transformers import StoppingCriteria, StoppingCriteriaList
-    input_ids = tokenizer.encode(base, return_tensors="pt")
-    out_ids = model.generate(
-        input_ids,
-        max_length=max_len,
-        do_sample=True,
-        top_k=50,
-        top_p=0.95,
-        temperature=1.0,
-        pad_token_id=tokenizer.eos_token_id if tokenizer.eos_token_id else None,
-    )
-    return tokenizer.decode(out_ids[0], skip_special_tokens=True).strip()
+def generar_mutacion(base: str) -> str:
+    """Aplica 2–3 mutaciones al SMILES base sin devolver el mismo texto."""
+    if not base or len(base) < 1:
+        base = "C"
 
-def es_valido(smiles: str) -> bool:
-    if not RDKit_OK:
-        return bool(smiles)
-    return Chem.MolFromSmiles(smiles) is not None
+    toks = tokenize_simple(base)
+    rng = random.Random()  # mutación sí debe ser aleatoria en cada request
+    n_ops = rng.randint(2, 3)
 
-def props_desde_smiles(smiles: str) -> dict:
-    if not RDKit_OK:
-        return {
-            "peso_molecular": None,
-            "prediccion_bioactiva": None,
-            "lipinski_ok": None,
-            "toxicidad_potencial": None,
-        }
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return {
-            "peso_molecular": None,
-            "prediccion_bioactiva": None,
-            "lipinski_ok": None,
-            "toxicidad_potencial": None,
-        }
-    mw = Descriptors.MolWt(mol)
-    logp = Crippen.MolLogP(mol)
-    hba = Lipinski.NumHAcceptors(mol)
-    hbd = Lipinski.NumHDonors(mol)
-    lip_ok = (mw < 500) and (logp <= 5) and (hba <= 10) and (hbd <= 5)
-    tox = "baja" if (logp <= 3.5 and mw < 600) else "media"
-    pred_bio = max(0.0, min(1.0, 1.0 - (abs(logp) / 6.0)))
+    for _ in range(n_ops):
+        if not toks:
+            toks = tokenize_simple("C")
+
+        op = rng.choice(["insert", "replace", "delete"])
+
+        if op == "insert":
+            frag = rng.choice(FRAGS)
+            pos = rng.randrange(0, len(toks)+1)
+            toks[pos:pos] = tokenize_simple(frag)
+
+        elif op == "replace" and len(toks) > 0:
+            frag = rng.choice(FRAGS)
+            pos = rng.randrange(0, len(toks))
+            toks[pos:pos+1] = tokenize_simple(frag)
+
+        elif op == "delete" and len(toks) > 2:
+            i = rng.randrange(0, len(toks))
+            j = min(len(toks), i + rng.randint(1, 2))
+            del toks[i:j]
+
+        # acotar tamaño
+        if len(toks) > 60:
+            toks = toks[:60]
+
+    out = "".join(toks).strip()
+    # evitar devolver igual
+    if out == base or len(out) < 2:
+        out = base + rng.choice(["C","N","O","Cl","Br"])
+    return out
+
+def props_mock(smiles: str) -> dict:
+    """Propiedades plausibles (mock) derivadas de un RNG determinístico por SMILES."""
+    rng = det_rand(smiles)
+
+    # Peso entre 120 y 520 aprox.
+    peso = round(120 + rng.random() * 400, 2)
+
+    # Predicción bioactiva entre 0..1
+    p_bio = round(rng.random(), 3)
+
+    # Conteos simples para 'regla' de Lipinski aproximada
+    n_N = len(re.findall(r"N", smiles))
+    n_O = len(re.findall(r"O", smiles))
+    n_hal = len(re.findall(r"Cl|Br|F", smiles))
+
+    # Heurística tosca de aceptores/donores
+    hbd = min(5, n_N)               # donores ~ N
+    hba = min(10, n_N + n_O)        # aceptores ~ N+O
+
+    # Lipinski (mock): peso < 500 y límites HBD/HBA
+    lip_ok = (peso < 500) and (hbd <= 5) and (hba <= 10)
+
+    # Toxicidad a ojímetro (más halógenos/peso -> sube)
+    tox_score = (n_hal * 0.7) + (0 if peso < 300 else 0.8) + (0.5 if not lip_ok else 0)
+    if tox_score < 0.8:
+        tox = "baja"
+    elif tox_score < 1.6:
+        tox = "media"
+    else:
+        tox = "alta"
+
     return {
-        "peso_molecular": round(float(mw), 2),
-        "prediccion_bioactiva": round(float(pred_bio), 3),
-        "lipinski_ok": bool(lip_ok),
+        "peso_molecular": peso,
+        "prediccion_bioactiva": p_bio,
+        "lipinski_ok": lip_ok,
         "toxicidad_potencial": tox,
     }
 
 @app.post("/infer")
 def infer(body: InferInput):
     base = (body.smiles or body.prompt or "C").strip()
-
-    if USE_MODEL:
-        # intentar algunas veces que sea distinto y válido
-        new_smiles = None
-        for _ in range(6):
-            cand = generar_con_modelo(base)
-            if cand and cand != base and es_valido(cand):
-                new_smiles = cand
-                break
-        if not new_smiles:
-            # si el modelo no dio algo útil, uso fallback
-            new_smiles = mutate_smiles(base)
-    else:
-        new_smiles = mutate_smiles(base)
-
-    props = props_desde_smiles(new_smiles)
+    new_smiles = generar_mutacion(base)
+    props = props_mock(new_smiles)
     return {"smiles": new_smiles, **props}
+@app.get("/")
+def root():
+    return {"mensaje": "IA viva"}
